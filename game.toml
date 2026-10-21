@@ -1,0 +1,55 @@
+# Autofilled by tools/new_project_layout/probe_disc.py from your legal dump.
+# Review before shipping. Runtime quirks / overlay seeds still need hand work.
+
+[game]
+name = "WormsWorldParty"
+id = "SLUS-01448"
+players = 4
+exe = "disc/SLUS_014.48"
+disc = "/Users/nicolas.delponte/Downloads/Worms World Party (USA) (En,Fr,De,Es,It,Nl,Sv,Da)/Worms World Party (USA) (En,Fr,De,Es,It,Nl,Sv,Da)/Worms World Party (USA) (En,Fr,De,Es,It,Nl,Sv,Da).cue"
+load_address = "0x80010000"
+entry_pc = "0x8001D2BC"
+text_size = "0x00031800"
+stack_base = "0x801FFFF0"
+
+# Digests are for data Track 01 (first BINARY FILE / TRACK 01).
+[prepare_disc]
+out_dir = "disc"
+bin_name = "Worms World Party (USA) (En,Fr,De,Es,It,Nl,Sv,Da).bin"
+cue_name = "Worms World Party (USA) (En,Fr,De,Es,It,Nl,Sv,Da).cue"
+boot_exe = "SLUS_014.48"
+known_sizes = [515135040]
+known_md5 = [
+  "dacbceb9b50807dc12b29ee5f4f9ceeb",
+]
+known_sha1 = [
+  "34ef238b8e60c3da979716d66ac364ab4986dc45",
+]
+known_crc32 = [
+  "47f0f278",
+]
+
+[recompiler]
+seeds = "seeds/ghidra_funcs.txt"
+out_dir = "generated"
+strict = true
+
+[runtime]
+window_title = "WormsWorldParty Recompiled"
+memcard_dir = "saves"
+overlay_cache = true
+
+[video]
+renderer = "opengl"
+aspect_ratio = "4:3"
+
+[controller]
+default_mode = "digital"
+
+# Online mount gate: digests + track count + optional TOC fingerprint
+# (see docs/NETPLAY.md).
+multitap_analog = true
+[netplay]
+require_cue = true
+required_tracks = 1
+required_disc_fp = "5f79eec4736bc138f8df7e59d95d57e3b8dff2df9475c703cad77dccc989593e"
