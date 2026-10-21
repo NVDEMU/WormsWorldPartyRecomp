@@ -155,7 +155,7 @@ When all five are configured, the workflow signs with Developer ID, submits the 
 
 ## Project completeness
 
-GitHub Actions can only build from files committed to the repository. The current `main` branch must include the generated game's `CMakeLists.txt`, `game.toml`, `codegen_setup.c`, generated game C/stamp files, and `scripts/package_release.sh` before a fresh checkout can build a release. Do not commit the game disc image or a retail BIOS dump.
+GitHub Actions can only build from files committed to the repository. The current `main` branch must include the generated game's `CMakeLists.txt`, `game.toml`, `codegen_setup.c`, and generated game C/stamp files before a fresh checkout can build a release. The title-specific `scripts/package_release.sh` wrapper is included in this repository. Do not commit the game disc image or a retail BIOS dump.
 
 ## Credits and licensing
 
