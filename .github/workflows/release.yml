@@ -671,14 +671,12 @@ jobs:
 
       - name: Package Windows executable
         if: matrix.artifact == 'windows-x64'
-        shell: bash
         run: |
           set -euo pipefail
           bash scripts/package_native_release.sh "${{ matrix.artifact }}" "${RELEASE_VERSION}"
 
       - name: Package macOS app and DMG
         if: startsWith(matrix.artifact, 'macos-')
-        shell: bash
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -691,7 +689,6 @@ jobs:
 
       - name: Package Linux AppImage
         if: matrix.artifact == 'linux-x64'
-        shell: bash
         run: |
           set -euo pipefail
           bash scripts/package_native_release.sh "${{ matrix.artifact }}" "${RELEASE_VERSION}"
