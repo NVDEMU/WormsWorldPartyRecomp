@@ -11,7 +11,14 @@ endif()
 
 project(WormsWorldPartyRecomp LANGUAGES C CXX)
 
-# --- Opt-in product surfaces (OFF by default in the framework) -------------
+# This title ships framework builtin mods and exposes them in its launcher.
+# Force the Mods view on even in an existing build directory whose cache still
+# records recomp-ui's former default (OFF); otherwise the packages can be
+# present in the release while the player has no Mods page to configure them.
+set(RECOMP_UI_ENABLE_MODS ON CACHE BOOL
+    "Enable WWP's schema-driven PSXRecomp Mods launcher view" FORCE)
+
+# --- Product surfaces required by this game --------------------------------
 # Scaffold prompts / flags fill these. Without recomp-ui, PSX_RECOMP_UI is OFF.
 # The wizard (WIZARD_CMAKE_BLOCK / ENABLE_SETUP_WIZARD) is the first-run disc
 # picker; releases are compiled from the committed generated/ C, so it never
