@@ -1,0 +1,23 @@
+format_version = 5
+id = "psx.enhancement.8mb-ram"
+version = "1.0.0"
+name = "8 MB Main RAM (Advanced)"
+author = "psxrecomp"
+description = "Enables an opt-in 8 MB main RAM map for patches that require expanded PS1 memory. Disabled by default."
+resolver = "declarative"
+save_compatibility = "shared"
+
+[[target]]
+game_id = "*"
+
+[[feature]]
+id = "8mb-ram"
+name = "8 MB Main RAM"
+description = "Advanced compatibility option for patches written for expanded 8 MB RAM. Normal WWP play should leave this off. Savestates record the active size, so states from one setting do not load under the other. Both netplay peers must use the same setting."
+group = "Advanced"
+default_enabled = false
+hidden = false
+
+[[plugin]]
+feature = "8mb-ram"
+id = "psx.8mb-ram"

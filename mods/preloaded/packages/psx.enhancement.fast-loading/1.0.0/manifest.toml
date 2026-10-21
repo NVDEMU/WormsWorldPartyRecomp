@@ -1,0 +1,45 @@
+format_version = 5
+id = "psx.enhancement.fast-loading"
+version = "1.0.0"
+name = "Fast Loading (Legacy)"
+author = "psxrecomp"
+description = "Legacy compatibility feature. Uses a generic loading heuristic and is not a WWP-specific loading policy."
+resolver = "declarative"
+save_compatibility = "shared"
+
+[[target]]
+game_id = "*"
+
+[[feature]]
+id = "fast-loading"
+name = "Fast Loading (Legacy)"
+description = "Legacy and experimental; disabled by default. Accelerates host pacing when a generic heuristic detects loading, but does not implement a WWP-specific loading contract and may provide little or no benefit. Turn off if you see timing or stability problems."
+group = "Advanced"
+default_enabled = false
+hidden = false
+
+[[option]]
+feature = "fast-loading"
+id = "multiplier"
+label = "Host speed multiplier"
+description = "How much faster than real time a load may run. 1 is authentic. 2-32 is the useful range; larger values stop helping once the host is the limit. Ignored while Uncapped is enabled."
+group = "Advanced"
+type = "integer"
+min = 1
+max = 1024
+step = 1
+default = 4
+disabled_by = "uncapped"
+
+[[option]]
+feature = "fast-loading"
+id = "uncapped"
+label = "Uncapped (experimental)"
+description = "Run loads as fast as the host allows, ignoring the multiplier."
+group = "Advanced"
+type = "boolean"
+default = "false"
+
+[[plugin]]
+feature = "fast-loading"
+id = "psx.fast-loading"

@@ -41,11 +41,11 @@ endif()
 
 include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
 
-# This project's own mod catalog. The FRAMEWORK stages it -- together with its
-# builtin psx.* packages -- into <exe-dir>/mods/bundled, and refuses to
-# configure if a catalog exists here but is not declared. Never copy it by
-# hand: five titles did, and framework 4cc04be3's rename of the staged
-# directory broke all five silently (bead beads-eio.3.101).
+# This project's own mod catalog. The FRAMEWORK stages it after its builtin
+# psx.* packages into <exe-dir>/mods/bundled. WWP overrides three upstream
+# manifests here so advanced/legacy builtins are visible in the Mods page;
+# plugin implementations remain framework-owned. Never copy catalog files by
+# hand: framework catalog staging validates this declaration at build time.
 set(PSX_PRELOADED_MODS "${CMAKE_CURRENT_SOURCE_DIR}/mods/preloaded")
 if(NOT IS_DIRECTORY "${PSX_PRELOADED_MODS}")
     set(PSX_PRELOADED_MODS "NONE")
