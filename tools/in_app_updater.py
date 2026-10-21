@@ -462,10 +462,33 @@ def install_macos(archive_path: Path, install_root: Path, staging_parent: Path) 
         candidate.rename(candidate_name)
         candidate = candidate_name
 
-    # A macOS update replaces the whole .app bundle, unlike the Windows merge.
-    # Carry forward user-owned configuration, disc/BIOS choices, keyboard and
-    # controller binds, saves, launcher preferences, and user-installed mods.
+    # The present public Nightly builds use ad-hoc signatures. Refuse to
+    # rewrite a Developer ID-signed bundle because preserving writable game
+    # data inside Contents/Resources would invalidate its notarized seal.
+    signature = subprocess.run(
+        ["/usr/bin/codesign", "-dv", "--verbose=4", str(current)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False,
+    )
+    signature_text = signature.stdout + signature.stderr
+    if "Authority=Developer ID Application:" in signature_text:
+        raise RuntimeError(
+            "This installation has a Developer ID signature. Use the latest DMG "
+            "to update it; the in-app updater will not alter a notarized bundle."
+        )
+
+    # A macOS update replaces the whole .app bundle. WWP's runtime data lives
+    # in Contents/Resources, so carry forward user-owned configuration/saves.
     preserve_macos_user_data(current, candidate)
+    # Re-seal the modified ad-hoc bundle after copying player data, then verify
+    # it before touching the installed application.
+    subprocess.run(
+        ["/usr/bin/codesign", "--force", "--deep", "--sign", "-", "--timestamp=none", str(candidate)],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+    )
+    subprocess.run(
+        ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(candidate)],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+    )
     # Keep one package-only restore point before changing the installed app.
     snapshot_macos_install(install_root)
 
