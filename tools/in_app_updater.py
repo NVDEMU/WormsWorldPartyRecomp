@@ -282,7 +282,7 @@ def updater_data_directory() -> Path:
         base = os.environ.get("APPDATA")
         return Path(base) / "NVDEMU" / "Worms World Party Recompiled" if base else Path.home() / "AppData" / "Roaming" / "NVDEMU" / "Worms World Party Recompiled"
     base = os.environ.get("XDG_DATA_HOME")
-    return Path(base) / "NVDEMU" / "Worms World Party Recompiled - Enhanced Edition" if base else Path.home() / ".local" / "share" / "NVDEMU" / "Worms World Party Recompiled"
+    return Path(base) / "NVDEMU" / "Worms World Party Recompiled" if base else Path.home() / ".local" / "share" / "NVDEMU" / "Worms World Party Recompiled"
 
 
 def rollback_archive_path() -> Path:
