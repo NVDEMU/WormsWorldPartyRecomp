@@ -280,9 +280,9 @@ def updater_data_directory() -> Path:
         return Path.home() / "Library" / "Application Support" / "Worms World Party Recompiled"
     if os.name == "nt":
         base = os.environ.get("APPDATA")
-        return Path(base) / "NVDEMU" / "Worms World Party Recompiled - Enhanced Edition" if base else Path.home() / "AppData" / "Roaming" / "NVDEMU" / "Worms World Party Recompiled - Enhanced Edition"
+        return Path(base) / "NVDEMU" / "Worms World Party Recompiled" if base else Path.home() / "AppData" / "Roaming" / "NVDEMU" / "Worms World Party Recompiled"
     base = os.environ.get("XDG_DATA_HOME")
-    return Path(base) / "NVDEMU" / "Worms World Party Recompiled - Enhanced Edition" if base else Path.home() / ".local" / "share" / "NVDEMU" / "Worms World Party Recompiled - Enhanced Edition"
+    return Path(base) / "NVDEMU" / "Worms World Party Recompiled - Enhanced Edition" if base else Path.home() / ".local" / "share" / "NVDEMU" / "Worms World Party Recompiled"
 
 
 def rollback_archive_path() -> Path:
@@ -739,7 +739,7 @@ def main() -> int:
 
         version = str(manifest.get("version", "Nightly"))
         summary = (
-            f"An Worms World Party Recompiled Nightly update is available.\n\n"
+            f"A new Worms World Party Recompiled Nightly update is available.\n\n"
             f"Latest version: {version}\n"
             f"Latest commit: {remote_commit[:12]}\n"
             f"Installed commit: {local_commit[:12] if local_commit else 'unknown'}\n\n"
