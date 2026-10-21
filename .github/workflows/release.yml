@@ -230,6 +230,8 @@ jobs:
         run: |
           python -m py_compile tools/in_app_updater.py tools/test_nightly_updater.py tools/apply_wwp_updater_patch.py
           python tools/test_nightly_updater.py
+          bash -n scripts/package_release.sh
+          bash -n scripts/package_native_release.sh
 
       - name: Pin VERSION
         shell: bash
