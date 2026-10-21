@@ -388,6 +388,13 @@ PLIST
       xcrun stapler staple "$DMG"
       xcrun stapler validate "$DMG"
     fi
+
+    # The in-app updater installs the app bundle ZIP (not the DMG), allowing it
+    # to verify the checksum and atomically replace the whole .app after exit.
+    APP_ZIP="$DIST/wwp-${VERSION}-${PLATFORM}-app.zip"
+    /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$APP" "$APP_ZIP"
+    unzip -t "$APP_ZIP" >/dev/null
+    ls -lh "$APP_ZIP"
     ;;
 
   linux-x64)
