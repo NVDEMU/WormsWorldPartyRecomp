@@ -211,8 +211,12 @@ PLIST
       find "$DATA" -maxdepth 3 -type f | head -80
       exit 1
     fi
-    mv "$GAME" "$APPDIR/usr/bin/WormsWorldParty_Recompiled"
-    chmod +x "$APPDIR/usr/bin/WormsWorldParty_Recompiled"
+    # Keep the real executable beside game.toml, bios/, assets/, and the
+    # overlay toolchain: PSXRecomp resolves runtime payload paths relative to
+    # the executable / app base path. linuxdeploy gets a copy for dependency
+    # scanning while AppRun launches the co-located original.
+    chmod +x "$GAME"
+    cp "$GAME" "$APPDIR/usr/bin/WormsWorldParty_Recompiled"
 
     cat > "$APPDIR/AppRun" <<'APP_RUN'
 #!/bin/sh
@@ -220,7 +224,7 @@ set -eu
 APPDIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 cd "$APPDIR/opt/wormsworldparty"
-exec "$APPDIR/usr/bin/WormsWorldParty_Recompiled" --game "$APPDIR/opt/wormsworldparty/game.toml" "$@"
+exec "$APPDIR/opt/wormsworldparty/WormsWorldParty_Recompiled" --game "$APPDIR/opt/wormsworldparty/game.toml" "$@"
 APP_RUN
     chmod +x "$APPDIR/AppRun"
     cat > "$APPDIR/usr/share/applications/wwp.desktop" <<'DESKTOP'
