@@ -26,6 +26,17 @@ fi
 chmod +x "${PACKAGER}" 2>/dev/null || true
 
 EXTRA=()
+# Provenance lets the updater compare this installed build with the Nightly
+# commit. It is generated in the build directory and never committed.
+case "${BUILD_DIR}" in
+  /*) BUILD_ROOT="${BUILD_DIR}" ;;
+  *)  BUILD_ROOT="${ROOT}/${BUILD_DIR}" ;;
+esac
+COMMIT_ID="${GITHUB_SHA:-$(git -C "${ROOT}" rev-parse HEAD)}"
+BUILD_VERSION="${RELEASE_VERSION:-local}"
+printf '{\n  "repository": "NVDEMU/WormsWorldPartyRecomp",\n  "commit": "%s",\n  "version": "%s",\n  "platform": "%s"\n}\n' \
+  "${COMMIT_ID}" "${BUILD_VERSION}" "${ARTIFACT_TAG}" > "${BUILD_ROOT}/BUILD_PROVENANCE.json"
+EXTRA+=(--runtime-file BUILD_PROVENANCE.json --runtime-dir update)
 # CI does not have the player's game disc, so it cannot compile the optional
 # runtime overlay cache. The committed static AOT shard is linked into the
 # executable; overlay_toolchain/ handles remaining overlays at runtime.
