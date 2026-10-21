@@ -34,8 +34,19 @@ case "${BUILD_DIR}" in
 esac
 COMMIT_ID="${GITHUB_SHA:-$(git -C "${ROOT}" rev-parse HEAD)}"
 BUILD_VERSION="${RELEASE_VERSION:-local}"
-printf '{\n  "repository": "NVDEMU/WormsWorldPartyRecomp",\n  "commit": "%s",\n  "version": "%s",\n  "platform": "%s"\n}\n' \
+printf '{\\n  "repository": "NVDEMU/WormsWorldPartyRecomp",\\n  "commit": "%s",\\n  "version": "%s",\\n  "platform": "%s"\\n}\\n' \
   "${COMMIT_ID}" "${BUILD_VERSION}" "${ARTIFACT_TAG}" > "${BUILD_ROOT}/BUILD_PROVENANCE.json"
+
+# Bundle trusted CA roots next to updater.py because portable Python may not
+# know the host OS's CA search path. HTTPS validation stays enabled on all OSes.
+mkdir -p "${BUILD_ROOT}/update"
+curl --fail --location --retry 3 --silent --show-error \
+  --output "${BUILD_ROOT}/update/cacert.pem" \
+  https://curl.se/ca/cacert.pem
+if ! grep -q 'BEGIN CERTIFICATE' "${BUILD_ROOT}/update/cacert.pem"; then
+  echo "error: updater CA bundle download is empty or invalid" >&2
+  exit 1
+fi
 EXTRA+=(--runtime-file BUILD_PROVENANCE.json --runtime-dir update)
 # CI does not have the player's game disc, so it cannot compile the optional
 # runtime overlay cache. The committed static AOT shard is linked into the
