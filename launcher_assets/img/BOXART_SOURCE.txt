@@ -1,0 +1,5 @@
+Box art sourced from libretro-thumbnails (Named_Boxarts).
+Matched name: Worms World Party (USA) (En,Fr,De,Es,It,Nl,Sv,Da)
+URL: https://thumbnails.libretro.com/Sony%20-%20PlayStation/Named_Boxarts/Worms%20World%20Party%20(USA)%20(En%2CFr%2CDe%2CEs%2CIt%2CNl%2CSv%2CDa).png
+https://github.com/libretro-thumbnails/libretro-thumbnails
+PNG is for README; TGA is for recomp-ui LAUNCHER_BOXART.

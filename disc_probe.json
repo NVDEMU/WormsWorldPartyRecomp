@@ -1,0 +1,31 @@
+{
+  "cue_path": "/Users/nicolas.delponte/Downloads/Worms World Party (USA) (En,Fr,De,Es,It,Nl,Sv,Da)/Worms World Party (USA) (En,Fr,De,Es,It,Nl,Sv,Da)/Worms World Party (USA) (En,Fr,De,Es,It,Nl,Sv,Da).cue",
+  "cue_name": "Worms World Party (USA) (En,Fr,De,Es,It,Nl,Sv,Da).cue",
+  "bin_name": "Worms World Party (USA) (En,Fr,De,Es,It,Nl,Sv,Da).bin",
+  "track_count": 1,
+  "data_track_size": 515135040,
+  "data_track_md5": "dacbceb9b50807dc12b29ee5f4f9ceeb",
+  "data_track_sha1": "34ef238b8e60c3da979716d66ac364ab4986dc45",
+  "data_track_crc32": "47f0f278",
+  "boot_exe": "SLUS_014.48",
+  "serial": "SLUS-01448",
+  "serial_exe": "SLUS_014.48",
+  "volume_id": "",
+  "display_name": "WormsWorldParty",
+  "load_address": "0x80010000",
+  "entry_pc": "0x8001D2BC",
+  "text_size": "0x00031800",
+  "stack_base": "0x801FFFF0",
+  "require_cue": true,
+  "required_disc_fp": "5f79eec4736bc138f8df7e59d95d57e3b8dff2df9475c703cad77dccc989593e",
+  "boot_exe_sha256": "f0af853f27477a8f0668800eef540ee72d0057962b79b4c235176ea7531bf0f1",
+  "seed_count": 387,
+  "warnings": [
+    "cue has only 1 TRACK \u2014 Track-01-only dumps fail multi-track netplay/catalog gates; prefer a full Redump cue."
+  ],
+  "notes": [
+    "entry_pc/load_address/text_size/stack_base taken from PS-X EXE header.",
+    "seeds are first-pass boot-EXE JAL targets (+ entry); expect to grow as overlays / runtime paths are discovered.",
+    "required_disc_fp is psxrecomp-toc-v1 (matches runtime DiscIdentity)."
+  ]
+}

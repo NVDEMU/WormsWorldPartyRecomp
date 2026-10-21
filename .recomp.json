@@ -1,0 +1,13 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "WormsWorldParty",
+  "system": "PS1",
+  "type": "recomp",
+  "toolchain": "psxrecomp",
+  "status": "exploring",
+  "project": "WormsWorldPartyRecomp",
+  "original": {
+    "region": "USA",
+    "serial": "SLUS-01448"
+  }
+}
