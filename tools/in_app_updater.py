@@ -526,10 +526,13 @@ def _copy_preserved_user_path(source: Path, destination: Path) -> None:
 
 def preserve_macos_user_data(current_bundle: Path, candidate_bundle: Path) -> None:
     """Carry user data from the old .app into the replacement before swapping."""
-    old_root = current_bundle / "Contents" / "MacOS"
-    new_root = candidate_bundle / "Contents" / "MacOS"
+    # WWP's custom Finder launcher keeps game.toml, saves, mods, and
+    # BUILD_PROVENANCE.json in Contents/Resources and changes cwd there before
+    # starting the real game binary. Preserve that runtime-data directory.
+    old_root = current_bundle / "Contents" / "Resources"
+    new_root = candidate_bundle / "Contents" / "Resources"
     if not old_root.is_dir() or not new_root.is_dir():
-        raise RuntimeError("Could not locate the old and new macOS application runtime folders.")
+        raise RuntimeError("Could not locate the old and new macOS application resource folders.")
 
     for relative_name in MACOS_PRESERVED_ROOTS:
         source = old_root / relative_name
