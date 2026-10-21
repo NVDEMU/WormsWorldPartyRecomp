@@ -77,6 +77,27 @@ class NightlyUpdaterTests(unittest.TestCase):
         self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
         self.assertTrue(context.check_hostname)
 
+    def test_platform_package_names_match_release_assets(self):
+        with mock.patch.object(UPDATER.os, "name", "nt"):
+            self.assertEqual(
+                UPDATER.platform_suffixes(),
+                ("-windows-x64.zip", "SHA256SUMS-windows-x64.txt"),
+            )
+        with mock.patch.object(UPDATER.os, "name", "posix"), \
+             mock.patch.object(UPDATER.sys, "platform", "darwin"), \
+             mock.patch.object(UPDATER.platform, "machine", return_value="arm64"):
+            self.assertEqual(
+                UPDATER.platform_suffixes(),
+                ("-macos-arm64-app.zip", "SHA256SUMS-macos-arm64.txt"),
+            )
+        with mock.patch.object(UPDATER.os, "name", "posix"), \
+             mock.patch.object(UPDATER.sys, "platform", "darwin"), \
+             mock.patch.object(UPDATER.platform, "machine", return_value="x86_64"):
+            self.assertEqual(
+                UPDATER.platform_suffixes(),
+                ("-macos-x64-app.zip", "SHA256SUMS-macos-x64.txt"),
+            )
+
     def test_checksum_parser_selects_exact_asset(self):
         text = "a" * 64 + "  other.zip\n" + "b" * 64 + "  current.zip\n"
         self.assertEqual(UPDATER.checksum_for_asset(text, "current.zip"), "b" * 64)
