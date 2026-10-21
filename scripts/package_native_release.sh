@@ -7,6 +7,7 @@ PLATFORM="${1:?Usage: package_native_release.sh <platform> <version>}"
 VERSION="${2:?Usage: package_native_release.sh <platform> <version>}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="${ROOT}/dist"
+cd "${ROOT}"
 ZIP="$(find "$DIST" -maxdepth 1 -type f -name "wwp-*-${PLATFORM}.zip" -print -quit)"
 if [[ -z "$ZIP" || ! -f "$ZIP" ]]; then
   echo "::error::No portable ZIP found for ${PLATFORM} in ${DIST}"
