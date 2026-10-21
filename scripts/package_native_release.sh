@@ -32,7 +32,7 @@ case "$PLATFORM" in
       exit 1
     fi
     cp "$EXE" "$DIST/wwp-${VERSION}-windows-x64.exe"
-    file "$DIST/wwp-${VERSION}-windows-x64.exe"
+    ls -lh "$DIST/wwp-${VERSION}-windows-x64.exe"
     ;;
 
   macos-arm64|macos-x64)
