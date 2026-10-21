@@ -54,6 +54,197 @@ case "$PLATFORM" in
     mv "$GAME" "$MACOS/WormsWorldParty_Recompiled.real"
     chmod +x "$MACOS/WormsWorldParty_Recompiled.real"
 
+    # Bundle every non-system dylib dependency into Contents/Frameworks.
+    # A CI build can link successfully against Homebrew's SDL3, but that
+    # Homebrew path does not exist on a player's Mac. Rewrite load commands so
+    # Finder launches the same self-contained app without requiring Homebrew.
+    python3 - "$MACOS/WormsWorldParty_Recompiled.real" "$CONTENTS/Frameworks" <<'PY'
+import hashlib
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+
+binary = Path(sys.argv[1]).resolve()
+frameworks = Path(sys.argv[2])
+frameworks.mkdir(parents=True, exist_ok=True)
+executable_dir = binary.parent
+
+SYSTEM_PREFIXES = (
+    "/System/Library/",
+    "/usr/lib/",
+    "/System/iOSSupport/System/Library/",
+    "/Library/Apple/System/Library/",
+)
+SYSTEM_NAMES = {
+    "libSystem.B.dylib", "libSystem.dylib", "libc++.1.dylib", "libc++abi.dylib",
+    "libobjc.A.dylib", "libdispatch.dylib", "libdyld.dylib",
+}
+def run(*args):
+    return subprocess.run(args, check=True, text=True, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE).stdout
+
+def is_system_path(value):
+    return value.startswith(SYSTEM_PREFIXES)
+
+def rpaths_for(image):
+    lines = run("otool", "-l", str(image)).splitlines()
+    result = []
+    for i, line in enumerate(lines):
+        if line.strip() == "cmd LC_RPATH":
+            for next_line in lines[i + 1:i + 5]:
+                match = re.match(r"\s*path (.+) \(offset \d+\)", next_line)
+                if match:
+                    result.append(match.group(1))
+                    break
+    return result
+
+def expand_rpath(value, image):
+    if value.startswith("@loader_path/"):
+        return str(image.parent / value[len("@loader_path/"):])
+    if value == "@loader_path":
+        return str(image.parent)
+    if value.startswith("@executable_path/"):
+        return str(executable_dir / value[len("@executable_path/"):])
+    if value == "@executable_path":
+        return str(executable_dir)
+    return value
+
+def dependencies(image):
+    lines = run("otool", "-L", str(image)).splitlines()[1:]
+    result = []
+    for line in lines:
+        match = re.match(r"\s*(.+?) \((?:compatibility|current) version ", line)
+        if match:
+            result.append(match.group(1))
+    return result
+
+prefixes = {Path("/opt/homebrew"), Path("/usr/local")}
+try:
+    brew_prefix = run("brew", "--prefix").strip()
+    if brew_prefix:
+        prefixes.add(Path(brew_prefix))
+except (FileNotFoundError, subprocess.CalledProcessError):
+    pass
+
+search_roots = []
+for prefix in sorted(prefixes, key=str):
+    search_roots.append(prefix / "lib")
+    opt = prefix / "opt"
+    if opt.is_dir():
+        for formula in opt.iterdir():
+            search_roots.extend((formula / "lib", formula / "Frameworks"))
+
+def resolve_dependency(load_name, image, rpath_stack):
+    candidates = []
+    if load_name.startswith("/"):
+        candidates.append(Path(load_name))
+    elif load_name.startswith("@loader_path/"):
+        candidates.append(image.parent / load_name[len("@loader_path/"):])
+    elif load_name.startswith("@executable_path/"):
+        candidates.append(executable_dir / load_name[len("@executable_path/"):])
+    elif load_name.startswith("@rpath/"):
+        suffix = load_name[len("@rpath/"):]
+        for raw_rpath in rpath_stack:
+            root = Path(expand_rpath(raw_rpath, image))
+            candidates.append(root / suffix)
+        for root in search_roots:
+            candidates.append(root / suffix)
+    else:
+        candidates.append(image.parent / load_name)
+        for root in search_roots:
+            candidates.append(root / load_name)
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (OSError, RuntimeError):
+            continue
+        if resolved.is_file():
+            return resolved
+    if Path(load_name).name in SYSTEM_NAMES:
+        return None
+    return None
+
+source_to_dest = {}
+dest_sources = {}
+edges = {}
+pending = [(binary, [])]
+seen = set()
+
+while pending:
+    image, inherited_rpaths = pending.pop()
+    image = image.resolve()
+    if image in seen:
+        continue
+    seen.add(image)
+    current_rpaths = rpaths_for(image) + list(inherited_rpaths)
+    image_edges = []
+    for load_name in dependencies(image):
+        if is_system_path(load_name):
+            continue
+        source = resolve_dependency(load_name, image, current_rpaths)
+        if source is None:
+            raise SystemExit(
+                "ERROR: unresolved non-system macOS dependency "
+                + repr(load_name) + " loaded by " + str(image)
+            )
+        if is_system_path(str(source)):
+            continue
+        source_key = source.resolve()
+        if source_key not in source_to_dest:
+            name = Path(load_name.rstrip("/")).name or source_key.name
+            if name in dest_sources and dest_sources[name] != source_key:
+                digest = hashlib.sha256(str(source_key).encode()).hexdigest()[:8]
+                suffix = "".join(Path(name).suffixes)
+                stem = name[:-len(suffix)] if suffix else name
+                name = stem + "-" + digest + suffix
+            destination = frameworks / name
+            if destination.exists() and source_key not in dest_sources.values():
+                digest = hashlib.sha256(str(source_key).encode()).hexdigest()[:8]
+                suffix = "".join(Path(name).suffixes)
+                stem = name[:-len(suffix)] if suffix else name
+                name = stem + "-" + digest + suffix
+                destination = frameworks / name
+            shutil.copy2(source_key, destination)
+            source_to_dest[source_key] = destination
+            dest_sources[destination.name] = source_key
+            pending.append((source_key, current_rpaths))
+            print("Bundled macOS dependency:", source_key, "->", destination)
+        image_edges.append((load_name, source_to_dest[source_key].name))
+    edges[image] = image_edges
+
+# Rewrite imports only after the complete dependency closure has been copied.
+for image, image_edges in edges.items():
+    target = binary if image == binary else source_to_dest[image]
+    for old_name, bundled_name in image_edges:
+        replacement = ("@rpath/" if image == binary else "@loader_path/") + bundled_name
+        if old_name != replacement:
+            subprocess.run(["install_name_tool", "-change", old_name, replacement, str(target)],
+                           check=True)
+    if image == binary:
+        existing = rpaths_for(target)
+        if "@executable_path/../Frameworks" not in existing:
+            subprocess.run(["install_name_tool", "-add_rpath",
+                            "@executable_path/../Frameworks", str(target)], check=True)
+    else:
+        subprocess.run(["install_name_tool", "-id",
+                        "@rpath/" + target.name, str(target)], check=True)
+
+# Verify that no dependency still points at a build-machine/Homebrew path.
+for target in [binary, *source_to_dest.values()]:
+    for load_name in dependencies(target):
+        if load_name.startswith(("/opt/homebrew/", "/usr/local/Cellar/", "/usr/local/opt/")):
+            raise SystemExit("ERROR: non-portable dylib reference remains: "
+                             + str(target) + " -> " + load_name)
+print("macOS dependency bundle verified:", len(source_to_dest), "non-system dylib(s)")
+PY
+
+    # The launcher itself is tiny and native; explicitly match the app's
+    # advertised minimum OS instead of inheriting the build runner's default.
+
     # The small native launcher gives Finder a real Mach-O application entry
     # point, sets the resource working directory, and applies the SDL3
     # macOS mouse workaround that was verified with this project.
