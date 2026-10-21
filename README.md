@@ -17,6 +17,14 @@ Open **[Releases](https://github.com/NVDEMU/WormsWorldPartyRecomp/releases/lates
 
 The game executable and runtime are provided; **the retail game disc and retail PlayStation BIOS are not**. Select your legally obtained disc image in the first-run launcher, or pass its CUE path with `--disc`. The bundled OpenBIOS backend is included.
 
+### In-app Nightly updater
+
+Windows and macOS Nightly builds include **Check for Updates** in the launcher dashboard. The updater checks the official `NVDEMU/WormsWorldPartyRecomp` Nightly release, asks before downloading, verifies the matching platform ZIP against its SHA-256 checksum, and waits for the game to close before installing. It preserves player saves, settings, disc/BIOS selections, controller mappings, and mod-enable state.
+
+The first version with the updater must be installed manually from Releases. Later Nightly builds can be installed from the launcher. Linux AppImage updates remain manual for now: download the newest AppImage from [Releases](https://github.com/NVDEMU/WormsWorldPartyRecomp/releases).
+
+If a Mac installation is Developer ID-signed, the updater will refuse to rewrite that sealed app; install the new DMG instead. Current builds are ad-hoc signed unless the optional Apple signing/notarization secrets are configured.
+
 ### macOS Gatekeeper
 
 The release workflow verifies the app's code signature after packaging so the bundle is not shipped with a stale or invalid signature. For completely seamless Gatekeeper approval, configure the Apple Developer ID and notarization secrets listed under [macOS release signing](#macos-release-signing). Apple requires a Developer ID signature and notarization for the normal trusted-distribution path. Without those credentials the workflow uses an ad-hoc signature, which can still result in an “unidentified developer” warning on a downloaded app. See [Apple's Developer ID guidance](https://developer.apple.com/developer-id/) and [notarization documentation](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
@@ -141,7 +149,7 @@ SDL_MAC_USE_GCMOUSE=0 ./build-release/WormsWorldParty_Recompiled --game "$PWD/ga
 
 ## GitHub Release packaging
 
-The `.github/workflows/release.yml` workflow builds Windows x64, Linux x64, macOS Apple Silicon, and macOS Intel. Alongside the portable ZIP it creates the Windows executable, a macOS DMG containing a real `.app` bundle, and the Linux AppImage. The macOS launcher sets its working directory to the app's bundled resources and preserves the tested SDL3 input workaround. The workflow runs `codesign --verify --deep --strict` after signing the app.
+The `.github/workflows/release.yml` workflow builds Windows x64, Linux x64, macOS Apple Silicon, and macOS Intel. Alongside the portable ZIP it creates the Windows executable, a macOS DMG containing a real `.app` bundle (plus an app ZIP used by the updater), and the Linux AppImage. Nightly releases include SHA-256 files and a channel/commit manifest consumed by the Windows/macOS updater. The macOS launcher sets its working directory to the app's bundled resources, bundles its non-system dylib dependencies, and preserves the tested SDL3 input workaround. The workflow runs `codesign --verify --deep --strict` after signing the app.
 
 To enable trusted macOS distribution without the unidentified-developer warning, configure these repository Actions secrets:
 

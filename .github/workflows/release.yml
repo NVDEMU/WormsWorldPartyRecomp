@@ -220,6 +220,16 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      - name: Set up Python for updater safety tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Test updater safety rules
+        run: |
+          python -m py_compile tools/in_app_updater.py tools/test_nightly_updater.py tools/apply_wwp_updater_patch.py
+          python tools/test_nightly_updater.py
+
       - name: Pin VERSION
         shell: bash
         run: |
@@ -745,6 +755,50 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           find artifacts -type f \( -name 'wwp-*.zip' -o -name 'wwp-*.exe' -o -name 'wwp-*.dmg' -o -name 'wwp-*.AppImage' \) -exec cp -v {} dist/ \;
+      - name: Generate checksums and updater manifest
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_TAG_NAME: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for item in \
+            "windows-x64:wwp-${RELEASE_VERSION}-windows-x64.zip" \
+            "macos-arm64:wwp-${RELEASE_VERSION}-macos-arm64-app.zip" \
+            "macos-x64:wwp-${RELEASE_VERSION}-macos-x64-app.zip"; do
+            platform="${item%%:*}"
+            filename="${item#*:}"
+            if [[ ! -f "dist/${filename}" ]]; then
+              echo "::error::Missing updater package dist/${filename}"
+              ls -lh dist/
+              exit 1
+            fi
+            (cd dist && sha256sum "${filename}" > "SHA256SUMS-${platform}.txt")
+          done
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+          tag = os.environ["RELEASE_TAG_NAME"]
+          metadata = {
+              "repository": "NVDEMU/WormsWorldPartyRecomp",
+              "channel": "nightly" if tag == "Nightly" else "release",
+              "tag": tag,
+              "version": version,
+              "commit": os.environ["GITHUB_SHA"],
+              "platforms": {
+                  "windows-x64": f"wwp-{version}-windows-x64.zip",
+                  "macos-arm64": f"wwp-{version}-macos-arm64-app.zip",
+                  "macos-x64": f"wwp-{version}-macos-x64-app.zip",
+              },
+          }
+          Path("dist/nightly-manifest.json").write_text(
+              json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
+          )
+          print("Generated checksums and release metadata for", tag)
+          PY
+
       - name: Move Nightly tag to the built commit
         if: github.event_name == 'push' && github.ref_type == 'branch'
         run: |
@@ -779,6 +833,8 @@ jobs:
           overwrite_files: true
           files: |
             dist/wwp-*
+            dist/SHA256SUMS-*.txt
+            dist/nightly-manifest.json
           generate_release_notes: true
           fail_on_unmatched_files: true
           target_commitish: ${{ github.sha }}

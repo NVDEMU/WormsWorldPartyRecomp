@@ -1,0 +1,813 @@
+#!/usr/bin/env python3
+"""Check and install the latest Worms World Party Recompiled Nightly.
+
+The launcher starts this helper as a separate process. Downloads are verified
+against the SHA256SUMS asset from the same GitHub release. Installation begins
+only after the launcher process exits. macOS installs a whole .app bundle via
+an atomic rename; Windows merges packaged files while preserving settings/saves.
+"""
+from __future__ import annotations
+
+import argparse
+import ctypes
+import hashlib
+import json
+import os
+import platform
+import shutil
+import signal
+import ssl
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+import zipfile
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+REPOSITORY = "NVDEMU/WormsWorldPartyRecomp"
+RELEASE_TAG = "Nightly"
+API_RELEASE = f"https://api.github.com/repos/{REPOSITORY}/releases/tags/{RELEASE_TAG}"
+USER_AGENT = "nvd123-WormsWorldPartyRecomp-Updater/1.0"
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0)
+RUNTIME_TEMP_ENV = "NVD123_UPDATER_RUNTIME_TEMP"
+BOOTSTRAPPED_ENV = "NVD123_UPDATER_BOOTSTRAPPED"
+
+
+def _apple_script_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def notify(message: str, title: str = "Worms World Party Recompiled Updater",
+           kind: str = "info") -> None:
+    if os.name == "nt":
+        icon = {"error": 0x10, "warning": 0x30}.get(kind, 0x40)
+        ctypes.windll.user32.MessageBoxW(None, message, title, 0x00000000 | icon)
+        return
+    if sys.platform == "darwin":
+        script = (
+            f'display alert "{_apple_script_string(title)}" '
+            f'message "{_apple_script_string(message)}" '
+            f'as {"critical" if kind == "error" else "warning" if kind == "warning" else "informational"}'
+        )
+        subprocess.run(["/usr/bin/osascript", "-e", script],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       check=False)
+        return
+    print(f"{title}: {message}", file=sys.stderr if kind == "error" else sys.stdout)
+
+
+def ask_yes_no(message: str, title: str = "Worms World Party Recompiled Updater") -> bool:
+    if os.name == "nt":
+        result = ctypes.windll.user32.MessageBoxW(
+            None, message, title, 0x00000004 | 0x00000020 | 0x00010000
+        )
+        return result == 6  # IDYES
+    if sys.platform == "darwin":
+        script = (
+            f'display dialog "{_apple_script_string(message)}" '
+            f'with title "{_apple_script_string(title)}" '
+            'buttons {"Cancel", "Continue"} default button "Continue" cancel button "Cancel"'
+        )
+        result = subprocess.run(["/usr/bin/osascript", "-e", script],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, check=False)
+        return result.returncode == 0 and "button returned:Continue" in result.stdout
+    return False
+
+
+def _https_context() -> ssl.SSLContext:
+    """Build a verified TLS context, preferring the CA bundle shipped beside this helper."""
+    ca_file = Path(__file__).resolve().with_name("cacert.pem")
+    if ca_file.is_file():
+        try:
+            return ssl.create_default_context(cafile=str(ca_file))
+        except (OSError, ssl.SSLError) as exc:
+            raise RuntimeError(
+                f"The updater's bundled CA certificate file could not be loaded: {ca_file}"
+            ) from exc
+    # Developer/test source checkouts may not have run a release packaging step.
+    # Still require normal certificate and hostname verification in that case.
+    return ssl.create_default_context()
+
+
+def http_bytes(url: str, timeout: int = 45) -> bytes:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/vnd.github+json",
+            "Cache-Control": "no-cache",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout, context=_https_context()) as response:
+        return response.read()
+
+
+def get_json(url: str) -> dict[str, Any]:
+    data = json.loads(http_bytes(url).decode("utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("GitHub returned an unexpected JSON response.")
+    return data
+
+
+def local_provenance(install_root: Path) -> dict[str, Any]:
+    if os.name == "nt":
+        provenance = install_root / "BUILD_PROVENANCE.json"
+    else:
+        provenance = install_root.parent / "Resources" / "BUILD_PROVENANCE.json"
+    try:
+        data = json.loads(provenance.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def platform_suffixes() -> tuple[str, str]:
+    """Return the exact update ZIP suffix and checksum asset for this platform."""
+    if os.name == "nt":
+        return "-windows-x64.zip", "SHA256SUMS-windows-x64.txt"
+    if sys.platform == "darwin":
+        machine = platform.machine().lower()
+        if machine in ("arm64", "aarch64"):
+            arch = "arm64"
+        elif machine in ("x86_64", "amd64"):
+            arch = "x64"
+        else:
+            raise RuntimeError(f"Unsupported Mac architecture: {machine}")
+        return f"-macos-{arch}-app.zip", f"SHA256SUMS-macos-{arch}.txt"
+    raise RuntimeError(
+        "In-app installation currently supports macOS and Windows. "
+        "On Linux, download the newest AppImage from GitHub Releases."
+    )
+
+def download_to(url: str, destination: Path) -> None:
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=120, context=_https_context()) as response, destination.open("wb") as output:
+        shutil.copyfileobj(response, output, length=1024 * 1024)
+    if not destination.is_file() or destination.stat().st_size == 0:
+        raise RuntimeError("GitHub returned an empty download.")
+
+
+def checksum_for_asset(text: str, filename: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        pieces = stripped.split(None, 1)
+        if len(pieces) != 2:
+            continue
+        digest, listed_name = pieces
+        listed_name = listed_name.strip().lstrip("*")
+        if listed_name == filename and len(digest) == 64:
+            try:
+                int(digest, 16)
+                return digest.lower()
+            except ValueError:
+                pass
+    raise RuntimeError(f"The release checksum file does not contain {filename}.")
+
+
+def verify_archive_paths(archive_path: Path, allow_symlinks: bool) -> None:
+    seen: set[str] = set()
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        for info in archive.infolist():
+            name = info.filename
+            if not name or "\\" in name:
+                raise RuntimeError("The update archive has an invalid path.")
+            rel = PurePosixPath(name)
+            if rel.is_absolute() or any(part in ("..", "") for part in rel.parts):
+                raise RuntimeError("The update archive contains a path outside its install folder.")
+            if rel.parts and ":" in rel.parts[0]:
+                raise RuntimeError("The update archive contains a drive-qualified path.")
+            normalized = str(rel)
+            if normalized in seen:
+                raise RuntimeError("The update archive contains duplicate paths.")
+            seen.add(normalized)
+            mode = (info.external_attr >> 16) & 0xFFFF
+            if stat.S_ISLNK(mode):
+                if not allow_symlinks:
+                    raise RuntimeError("Windows updates must not contain symbolic links.")
+                try:
+                    target = archive.read(info).decode("utf-8")
+                except (UnicodeDecodeError, OSError) as exc:
+                    raise RuntimeError("The update archive contains an invalid symbolic link.") from exc
+                if not target or PurePosixPath(target).is_absolute() or "\\" in target:
+                    raise RuntimeError("The update archive contains an unsafe symbolic link.")
+                # Resolve the relative symlink target lexically within the package root.
+                stack = list(rel.parent.parts)
+                for part in PurePosixPath(target).parts:
+                    if part in ("", "."):
+                        continue
+                    if part == "..":
+                        if not stack:
+                            raise RuntimeError("The update archive contains an escaping symbolic link.")
+                        stack.pop()
+                    else:
+                        stack.append(part)
+
+
+def windows_wait_for_parent(pid: int) -> None:
+    if pid <= 0:
+        return
+    process = ctypes.windll.kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+    if not process:
+        return
+    try:
+        ctypes.windll.kernel32.WaitForSingleObject(process, 0xFFFFFFFF)
+    finally:
+        ctypes.windll.kernel32.CloseHandle(process)
+
+
+def parent_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        process = ctypes.windll.kernel32.OpenProcess(0x00100000, False, pid)
+        if not process:
+            return False
+        try:
+            return ctypes.windll.kernel32.WaitForSingleObject(process, 0) == 0x102
+        finally:
+            ctypes.windll.kernel32.CloseHandle(process)
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def wait_for_parent_exit(pid: int) -> None:
+    if pid <= 0:
+        return
+    if os.name == "nt":
+        windows_wait_for_parent(pid)
+        return
+    while parent_alive(pid):
+        time.sleep(1.0)
+
+
+def app_bundle_from_root(install_root: Path) -> Path:
+    candidates = [install_root, *install_root.parents]
+    for candidate in candidates:
+        if candidate.name.endswith(".app") and candidate.is_dir():
+            return candidate
+    raise RuntimeError("Could not locate the installed .app bundle above Contents/MacOS.")
+
+
+def validate_single_app_bundle(staging: Path) -> Path:
+    apps = list(staging.glob("*.app"))
+    if len(apps) != 1 or not apps[0].is_dir():
+        raise RuntimeError("The Mac update ZIP did not contain exactly one .app bundle.")
+    if not (apps[0] / "Contents" / "Info.plist").is_file():
+        raise RuntimeError("The downloaded .app bundle is missing Contents/Info.plist.")
+    return apps[0]
+
+
+
+def updater_data_directory() -> Path:
+    """Return the writable user-data folder shared with the launcher wrapper."""
+    override = os.environ.get("WWP_RECOMP_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Worms World Party Recompiled"
+    if os.name == "nt":
+        base = os.environ.get("APPDATA")
+        return Path(base) / "NVDEMU" / "Worms World Party Recompiled" if base else Path.home() / "AppData" / "Roaming" / "NVDEMU" / "Worms World Party Recompiled"
+    base = os.environ.get("XDG_DATA_HOME")
+    return Path(base) / "NVDEMU" / "Worms World Party Recompiled" if base else Path.home() / ".local" / "share" / "NVDEMU" / "Worms World Party Recompiled"
+
+
+def rollback_archive_path() -> Path:
+    return updater_data_directory() / "rollback" / "previous-build.zip"
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def snapshot_windows_install(install_root: Path) -> Path:
+    """Back up only shipped files; player data is deliberately excluded."""
+    root = install_root.resolve()
+    destination = rollback_archive_path()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.name + f".tmp-{os.getpid()}")
+    try:
+        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+            for path in sorted(root.rglob("*")):
+                rel = path.relative_to(root)
+                if should_preserve_windows_update_path(rel):
+                    continue
+                if rel.parts and rel.parts[0] == "mods" and len(rel.parts) > 1:
+                    if rel.parts[1] in ("custom", "installed"):
+                        continue
+                if path.is_dir() or path.is_symlink():
+                    continue
+                if not path.is_file():
+                    continue
+                resolved = path.resolve()
+                try:
+                    resolved.relative_to(root)
+                except ValueError:
+                    continue
+                archive.write(path, rel.as_posix())
+        with zipfile.ZipFile(temporary, "r") as archive:
+            if "WormsWorldParty_Recompiled.exe" not in archive.namelist():
+                raise RuntimeError("Could not create a rollback backup: current Windows package is missing WormsWorldParty_Recompiled.exe.")
+            verify_archive_paths(temporary, allow_symlinks=False)
+        os.replace(temporary, destination)
+        return destination
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def snapshot_macos_install(install_root: Path) -> Path:
+    current = app_bundle_from_root(install_root)
+    destination = rollback_archive_path()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.name + f".tmp-{os.getpid()}")
+    try:
+        subprocess.run(
+            ["/usr/bin/ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(current), str(temporary)],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+        )
+        if not temporary.is_file() or temporary.stat().st_size == 0:
+            raise RuntimeError("macOS did not create a valid rollback archive.")
+        with zipfile.ZipFile(temporary, "r") as archive:
+            app_names = {PurePosixPath(n).parts[0] for n in archive.namelist() if n and not n.startswith("__MACOSX/")}
+            if current.name not in app_names:
+                raise RuntimeError("The rollback archive does not contain the current .app bundle.")
+        os.replace(temporary, destination)
+        return destination
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def restore_macos_rollback(install_root: Path, staging_parent: Path) -> Path:
+    archive_path = rollback_archive_path()
+    if not archive_path.is_file():
+        raise RuntimeError("No previous build backup exists yet. Install a newer build once to create one.")
+    current = app_bundle_from_root(install_root)
+    extracted = staging_parent / "rollback-extract"
+    extracted.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["/usr/bin/ditto", "-x", "-k", str(archive_path), str(extracted)],
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    candidate = validate_single_app_bundle(extracted)
+    desired = extracted / current.name
+    if candidate != desired:
+        candidate.rename(desired)
+        candidate = desired
+    preserve_macos_user_data(current, candidate)
+    backup = current.parent / f".{current.name}.rollback-{os.getpid()}"
+    os.replace(current, backup)
+    try:
+        os.replace(candidate, current)
+    except Exception:
+        os.replace(backup, current)
+        raise
+    shutil.rmtree(backup, ignore_errors=True)
+    return current
+
+
+def _clear_windows_package_preserving_user_data(install_root: Path) -> None:
+    for child in install_root.iterdir():
+        if child.name in WINDOWS_PRESERVED_ROOTS:
+            continue
+        if child.name == "mods" and child.is_dir() and not child.is_symlink():
+            for item in child.iterdir():
+                if item.name in ("state.toml", "custom", "installed"):
+                    continue
+                _remove_path(item)
+            continue
+        _remove_path(child)
+
+
+def restore_windows_rollback(install_root: Path, staging_parent: Path) -> Path:
+    archive_path = rollback_archive_path()
+    if not archive_path.is_file():
+        raise RuntimeError("No previous build backup exists yet. Install a newer build once to create one.")
+    extracted = staging_parent / "rollback-extract"
+    extracted.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        verify_archive_paths(archive_path, allow_symlinks=False)
+        archive.extractall(extracted)
+    if not (extracted / "WormsWorldParty_Recompiled.exe").is_file():
+        raise RuntimeError("The previous Windows build backup is incomplete.")
+    _clear_windows_package_preserving_user_data(install_root)
+    for source in extracted.rglob("*"):
+        relative = source.relative_to(extracted)
+        if should_preserve_windows_update_path(relative):
+            continue
+        target = install_root / relative
+        if source.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    return install_root / "WormsWorldParty_Recompiled.exe"
+
+
+def rollback_install(install_root: Path, parent_pid: int) -> Path:
+    archive = rollback_archive_path()
+    if not archive.is_file():
+        raise RuntimeError("There is no saved previous build to roll back to yet. Install a newer build first.")
+    if not ask_yes_no(
+        "Restore the previous version of Worms World Party Recompiled?\n\n"
+        "Your saves, selected disc/BIOS, settings, and key mappings will be preserved. "
+        "The rollback backup will remain available after this operation.",
+        title="Worms World Party Recompiled — Roll Back"
+    ):
+        raise RuntimeError("Rollback cancelled.")
+    staging = Path(tempfile.mkdtemp(prefix="wwp-rollback-"))
+    try:
+        wait_for_parent_exit(parent_pid)
+        if sys.platform == "darwin":
+            restored = restore_macos_rollback(install_root, staging)
+            subprocess.Popen(["/usr/bin/open", str(restored)], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        elif os.name == "nt":
+            restored = restore_windows_rollback(install_root, staging)
+            subprocess.Popen([str(restored)], cwd=str(install_root),
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL,
+                             creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
+        else:
+            raise RuntimeError("In-app rollback supports macOS and Windows only.")
+        return restored
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def install_macos(archive_path: Path, install_root: Path, staging_parent: Path) -> Path:
+    current = app_bundle_from_root(install_root)
+    extracted = staging_parent / "extract"
+    extracted.mkdir(parents=True, exist_ok=True)
+    # ditto preserves the bundle's internal relative symlinks and resource metadata.
+    subprocess.run(["/usr/bin/ditto", "-x", "-k", str(archive_path), str(extracted)],
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    candidate = validate_single_app_bundle(extracted)
+    candidate_name = extracted / current.name
+    if candidate != candidate_name:
+        candidate.rename(candidate_name)
+        candidate = candidate_name
+
+    # The present public Nightly builds use ad-hoc signatures. Refuse to
+    # rewrite a Developer ID-signed bundle because preserving writable game
+    # data inside Contents/Resources would invalidate its notarized seal.
+    signature = subprocess.run(
+        ["/usr/bin/codesign", "-dv", "--verbose=4", str(current)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False,
+    )
+    signature_text = signature.stdout + signature.stderr
+    if "Authority=Developer ID Application:" in signature_text:
+        raise RuntimeError(
+            "This installation has a Developer ID signature. Use the latest DMG "
+            "to update it; the in-app updater will not alter a notarized bundle."
+        )
+
+    # A macOS update replaces the whole .app bundle. WWP's runtime data lives
+    # in Contents/Resources, so carry forward user-owned configuration/saves.
+    preserve_macos_user_data(current, candidate)
+    # Re-seal the modified ad-hoc bundle after copying player data, then verify
+    # it before touching the installed application.
+    subprocess.run(
+        ["/usr/bin/codesign", "--force", "--deep", "--sign", "-", "--timestamp=none", str(candidate)],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+    )
+    subprocess.run(
+        ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(candidate)],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+    )
+    # Keep one package-only restore point before changing the installed app.
+    snapshot_macos_install(install_root)
+
+    backup = current.parent / f".{current.name}.backup-{os.getpid()}"
+    try:
+        os.replace(current, backup)
+        try:
+            os.replace(candidate, current)
+        except Exception:
+            os.replace(backup, current)
+            raise
+    except OSError as exc:
+        raise RuntimeError(
+            "The new build is verified, but macOS could not replace this app bundle. "
+            "Move the app into a folder you can write to (for example ~/Applications) and retry."
+        ) from exc
+    shutil.rmtree(backup, ignore_errors=True)
+    return current
+
+
+# These files can contain player-selected paths, controller mappings, or
+# per-install preferences. The runtime package ships templates with the same
+# names, but an in-app update must never replace a player's existing choices.
+WINDOWS_PRESERVED_ROOTS = {
+    # These belong to the player, not to a particular release.
+    "saves",
+    "settings.toml",
+    "disc.cfg",
+    "bios.cfg",
+    "keybinds.ini",
+    "input.ini",
+    "config.ini",
+    "launcher-window.ini",
+    "game_options.toml",
+    "controller.ini",
+    "wwp_launcher.ini",
+}
+MACOS_PRESERVED_ROOTS = WINDOWS_PRESERVED_ROOTS
+
+
+def _copy_preserved_user_path(source: Path, destination: Path) -> None:
+    """Merge a user-owned path into a new app without replacing app files."""
+    if source.is_dir() and not source.is_symlink():
+        if destination.exists() and not destination.is_dir():
+            destination.unlink()
+        shutil.copytree(source, destination, dirs_exist_ok=True, symlinks=True)
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists() and destination.is_dir():
+        shutil.rmtree(destination)
+    if source.is_symlink():
+        if destination.exists() or destination.is_symlink():
+            destination.unlink()
+        destination.symlink_to(os.readlink(source), target_is_directory=source.is_dir())
+    else:
+        shutil.copy2(source, destination)
+
+
+def preserve_macos_user_data(current_bundle: Path, candidate_bundle: Path) -> None:
+    """Carry user data from the old .app into the replacement before swapping."""
+    # WWP's custom Finder launcher keeps game.toml, saves, mods, and
+    # BUILD_PROVENANCE.json in Contents/Resources and changes cwd there before
+    # starting the real game binary. Preserve that runtime-data directory.
+    old_root = current_bundle / "Contents" / "Resources"
+    new_root = candidate_bundle / "Contents" / "Resources"
+    if not old_root.is_dir() or not new_root.is_dir():
+        raise RuntimeError("Could not locate the old and new macOS application resource folders.")
+
+    for relative_name in MACOS_PRESERVED_ROOTS:
+        source = old_root / relative_name
+        if not source.exists() and not source.is_symlink():
+            continue
+        _copy_preserved_user_path(source, new_root / relative_name)
+
+    # Preserve the mod on/off choices, but do not restore stale bundled mods:
+    # the new Nightly's preloaded package catalog should always win.
+    old_mods = old_root / "mods"
+    new_mods = new_root / "mods"
+    if old_mods.is_dir():
+        state_source = old_mods / "state.toml"
+        if state_source.is_file():
+            _copy_preserved_user_path(state_source, new_mods / "state.toml")
+        for source in old_mods.rglob("*"):
+            relative = source.relative_to(old_mods)
+            if not relative.parts or relative.parts[0] == "preloaded":
+                continue
+            if relative == Path("state.toml") or source.is_dir():
+                continue
+            target = new_mods / relative
+            if target.exists() or target.is_symlink():
+                continue  # shipped files from this Nightly take precedence
+            _copy_preserved_user_path(source, target)
+
+
+def should_preserve_windows_update_path(relative: Path) -> bool:
+    if not relative.parts:
+        return True
+    if relative.parts[0] in WINDOWS_PRESERVED_ROOTS:
+        return True
+    # Mod enable/choice state is user data, while the actual bundled mod files
+    # remain updateable. Preserve only the state file, not the whole mods tree.
+    return len(relative.parts) >= 2 and relative.parts[0] == "mods" and relative.parts[1] == "state.toml"
+
+
+def install_windows(archive_path: Path, install_root: Path, staging_parent: Path) -> Path:
+    extracted = staging_parent / "extract"
+    extracted.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        verify_archive_paths(archive_path, allow_symlinks=False)
+        archive.extractall(extracted)
+    if not (extracted / "WormsWorldParty_Recompiled.exe").is_file():
+        raise RuntimeError("The Windows update ZIP is missing WormsWorldParty_Recompiled.exe.")
+
+    # Snapshot the package after the candidate is validated, before any files move.
+    snapshot_windows_install(install_root)
+
+    # Merge only files shipped by the new package. Never overwrite user data,
+    # and do not delete unknown/user-installed files from the installation.
+    for source in extracted.rglob("*"):
+        relative = source.relative_to(extracted)
+        if should_preserve_windows_update_path(relative):
+            continue
+        target = install_root / relative
+        if source.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(target.name + f".nvd123-update-{os.getpid()}.tmp")
+        shutil.copy2(source, temporary)
+        os.replace(temporary, target)
+    return install_root / "WormsWorldParty_Recompiled.exe"
+
+
+def detached_runtime_bootstrap(argv: list[str]) -> bool:
+    """Run from a temp copy of bundled Python so Windows can replace that runtime."""
+    if os.environ.get(BOOTSTRAPPED_ENV) == "1":
+        return False
+    exe = Path(sys.executable).resolve()
+    parts = [part.lower() for part in exe.parts]
+    try:
+        overlay_index = parts.index("overlay_toolchain")
+        if overlay_index + 1 >= len(parts) or parts[overlay_index + 1] != "python":
+            return False
+    except ValueError:
+        return False
+
+    source_python = exe.parent if os.name == "nt" else exe.parent.parent
+    temp_root = Path(tempfile.mkdtemp(prefix="ape-escape-updater-runtime-"))
+    target_python_root = temp_root / "python"
+    shutil.copytree(source_python, target_python_root, dirs_exist_ok=True)
+    staged_script = temp_root / "updater.py"
+    source_script = Path(__file__).resolve()
+    shutil.copy2(source_script, staged_script)
+    # This helper runs from the temporary directory now, so its adjacent CA
+    # bundle must move with it or the verified TLS context will miss the bundle.
+    source_ca_bundle = source_script.with_name("cacert.pem")
+    if source_ca_bundle.is_file():
+        shutil.copy2(source_ca_bundle, temp_root / "cacert.pem")
+    interpreter = target_python_root / ("python.exe" if os.name == "nt" else "bin/python3")
+    if not interpreter.is_file():
+        shutil.rmtree(temp_root, ignore_errors=True)
+        raise RuntimeError("Could not start the updater from its temporary runtime copy.")
+
+    env = os.environ.copy()
+    env[BOOTSTRAPPED_ENV] = "1"
+    env[RUNTIME_TEMP_ENV] = str(temp_root)
+    command = [str(interpreter), str(staged_script), *argv]
+    creationflags = (DETACHED_PROCESS | CREATE_NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)) if os.name == "nt" else 0
+    try:
+        subprocess.Popen(
+            command, env=env, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=creationflags, start_new_session=(os.name != "nt"),
+            close_fds=(os.name != "nt"),
+        )
+    except Exception:
+        shutil.rmtree(temp_root, ignore_errors=True)
+        raise
+    return True
+
+
+def cleanup_bootstrap_runtime() -> None:
+    temp_path = os.environ.get(RUNTIME_TEMP_ENV)
+    if not temp_path:
+        return
+    path = Path(temp_path)
+    if os.name == "nt":
+        # Windows cannot remove the running interpreter/DLLs; schedule cleanup
+        # after this process exits. No shell-supplied user path is interpolated.
+        command = f'for /L %i in (1,1,4) do @ping 127.0.0.1 -n 2 >nul & rmdir /s /q "{path}"'
+        subprocess.Popen(["cmd.exe", "/c", command], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS)
+    else:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--install-root", required=True, type=Path)
+    parser.add_argument("--parent-pid", type=int, required=True)
+    parser.add_argument("--rollback", action="store_true",
+                        help="restore the last saved application build without using the network")
+    args = parser.parse_args()
+    install_root = args.install_root.resolve()
+
+    try:
+        if args.rollback:
+            restored = rollback_install(install_root, args.parent_pid)
+            notify(f"Previous build restored successfully.\n\n{restored}")
+            return 0
+        suffix, checksum_name = platform_suffixes()
+        local = local_provenance(install_root)
+        local_commit = str(local.get("commit", "")).lower()
+
+        release = get_json(API_RELEASE)
+        if release.get("draft") or release.get("tag_name") != RELEASE_TAG:
+            raise RuntimeError("The repository did not return the expected Nightly release.")
+        assets_list = release.get("assets", [])
+        if not isinstance(assets_list, list):
+            raise RuntimeError("GitHub returned an invalid Nightly asset list.")
+        assets = {str(item.get("name", "")): item for item in assets_list if isinstance(item, dict)}
+
+        manifest_asset = assets.get("nightly-manifest.json")
+        if not manifest_asset:
+            raise RuntimeError(
+                "This Nightly does not yet publish updater metadata. Install a newer Nightly after the updater pipeline is enabled."
+            )
+        manifest = get_json(str(manifest_asset.get("browser_download_url", "")))
+        if manifest.get("repository") != REPOSITORY or manifest.get("channel") != "nightly":
+            raise RuntimeError("The release metadata is not for the official nvd123 Nightly channel.")
+        remote_commit = str(manifest.get("commit", "")).lower()
+        if len(remote_commit) != 40 or any(ch not in "0123456789abcdef" for ch in remote_commit):
+            raise RuntimeError("The Nightly metadata contains an invalid commit ID.")
+        if local_commit and local_commit == remote_commit:
+            notify(f"You are already up to date.\nInstalled commit: {remote_commit[:12]}")
+            return 0
+
+        package_matches = [item for item in assets_list
+                           if isinstance(item, dict) and str(item.get("name", "")).endswith(suffix)]
+        package_matches.sort(key=lambda item: str(item.get("updated_at", "")), reverse=True)
+        if not package_matches:
+            raise RuntimeError(f"The Nightly release does not include this platform package ({suffix}).")
+        package = package_matches[0]
+        checksum_asset = assets.get(checksum_name)
+        if not checksum_asset:
+            raise RuntimeError(f"The Nightly release is missing {checksum_name}.")
+
+        version = str(manifest.get("version", "Nightly"))
+        summary = (
+            f"A new Worms World Party Recompiled Nightly update is available.\n\n"
+            f"Latest version: {version}\n"
+            f"Latest commit: {remote_commit[:12]}\n"
+            f"Installed commit: {local_commit[:12] if local_commit else 'unknown'}\n\n"
+            "Download and verify the platform-specific update now?"
+        )
+        if not ask_yes_no(summary):
+            return 0
+
+        work = Path(tempfile.mkdtemp(prefix="wwp-nightly-update-"))
+        archive_path = work / str(package.get("name", "update.zip"))
+        checksum_path = work / checksum_name
+        try:
+            notify("Downloading the Nightly package and its SHA-256 checksum. This may take a little while.")
+            download_to(str(package["browser_download_url"]), archive_path)
+            download_to(str(checksum_asset["browser_download_url"]), checksum_path)
+            expected_hash = checksum_for_asset(
+                checksum_path.read_text(encoding="utf-8"),
+                str(package.get("name", "")),
+            )
+            hasher = hashlib.sha256()
+            with archive_path.open("rb") as source:
+                for block in iter(lambda: source.read(1024 * 1024), b""):
+                    hasher.update(block)
+            if hasher.hexdigest().lower() != expected_hash:
+                raise RuntimeError("The downloaded ZIP failed SHA-256 verification and will not be installed.")
+
+            is_macos = sys.platform == "darwin"
+            verify_archive_paths(archive_path, allow_symlinks=is_macos)
+            notify(
+                "The Nightly ZIP is downloaded and SHA-256 verified.\n\n"
+                "Click OK/Continue, then close Worms World Party Recompiled. "
+                "The updater will wait for the app to exit before installing.",
+            )
+            wait_for_parent_exit(args.parent_pid)
+
+            if is_macos:
+                app = install_macos(archive_path, install_root, work)
+                notify("Update installed successfully. Worms World Party Recompiled will reopen.")
+                subprocess.Popen(["/usr/bin/open", str(app)], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+            else:
+                exe = install_windows(archive_path, install_root, work)
+                notify("Update installed successfully. Worms World Party Recompiled will reopen.")
+                subprocess.Popen([str(exe)], cwd=str(install_root),
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL,
+                                 creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
+            return 0
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+    except Exception as exc:
+        notify(
+            f"The update was not installed.\n\n{exc}\n\n"
+            "Your existing installation and saves have been left in place.",
+            kind="error",
+        )
+        return 1
+    finally:
+        cleanup_bootstrap_runtime()
+
+
+if __name__ == "__main__":
+    raw_args = sys.argv[1:]
+    try:
+        if detached_runtime_bootstrap(raw_args):
+            raise SystemExit(0)
+        raise SystemExit(main())
+    except Exception as exc:
+        notify(f"The updater could not start safely:\n{exc}", kind="error")
+        raise SystemExit(1)

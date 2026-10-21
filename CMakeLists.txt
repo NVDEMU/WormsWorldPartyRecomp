@@ -23,6 +23,22 @@ if(EXISTS "${PSXRECOMP_ROOT}/lib/recomp-net/CMakeLists.txt")
 endif()
 set(PSX_SETUP_WIZARD ON CACHE BOOL
     "Advertise first-run setup wizard + Generate & rebuild in recomp-ui" FORCE)
+
+# Add a project-owned, guarded Nightly updater action to the shared launcher.
+# The patch mutates only this checkout's recomp-ui submodule for the build.
+if(NOT EMSCRIPTEN AND NOT ANDROID)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/apply_wwp_updater_patch.py"
+                --ui-root "${CMAKE_CURRENT_SOURCE_DIR}/recomp-ui"
+        RESULT_VARIABLE WWP_UPDATER_PATCH_RESULT
+    )
+    if(NOT WWP_UPDATER_PATCH_RESULT EQUAL 0)
+        message(FATAL_ERROR "Could not apply the Worms World Party Nightly updater launcher patch.")
+    endif()
+endif()
+
 include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
 
 # This project's own mod catalog. The FRAMEWORK stages it -- together with its
@@ -65,3 +81,14 @@ foreach(_PSX_RUNTIME_CONFIG game.toml game_options.toml)
             VERBATIM)
     endif()
 endforeach()
+
+# Bundle the Nightly updater helper beside the runtime data. The release ZIP
+# packager stages this directory into Windows installs and macOS app resources.
+add_custom_command(TARGET psx-runtime POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:psx-runtime>/update"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/in_app_updater.py"
+        "$<TARGET_FILE_DIR:psx-runtime>/update/updater.py"
+    COMMENT "Staging Worms World Party Nightly updater"
+    VERBATIM
+)
