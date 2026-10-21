@@ -1,0 +1,57 @@
+format_version = 5
+id = "psx.enhancement.cd-speed"
+version = "1.0.0"
+name = "CD Speed (Advanced)"
+author = "psxrecomp"
+description = "Emulated CD drive speed. Can shorten loads without intentionally speeding gameplay up, but timing-sensitive games may stall at higher values."
+resolver = "declarative"
+save_compatibility = "shared"
+
+[[target]]
+game_id = "*"
+
+[[feature]]
+id = "cd-speed"
+name = "CD Speed"
+description = "Disabled by default. Divides emulated sector delay so data arrives sooner while the game otherwise runs at normal speed. This changes when the game receives CD interrupts and can expose timing bugs. Try 2x first and back off if loading stalls; FMV and CD audio keep authentic timing."
+group = "Quality of Life"
+default_enabled = false
+hidden = false
+
+[[option]]
+feature = "cd-speed"
+id = "multiplier"
+label = "CD speed multiplier"
+description = "1 is authentic 1x. Try 2-32; higher is faster but more likely to trigger a timing bug. Ignored while Instant is enabled."
+group = "Quality of Life"
+type = "integer"
+min = 1
+max = 1024
+step = 1
+default = 4
+disabled_by = "instant"
+
+[[option]]
+feature = "cd-speed"
+id = "instant"
+label = "Instant (experimental)"
+description = "Deliver sectors as quickly as the bounded instant scheduler allows. Fastest and riskiest mode."
+group = "Advanced"
+type = "boolean"
+default = "false"
+
+[[option]]
+feature = "cd-speed"
+id = "instant_budget"
+label = "Instant sectors per frame"
+description = "Maximum sectors the instant scheduler may deliver per frame. Lower values are gentler on games that dislike bursts. Used only in Instant mode."
+group = "Advanced"
+type = "integer"
+min = 1
+max = 256
+step = 1
+default = 32
+
+[[plugin]]
+feature = "cd-speed"
+id = "psx.cd-speed"
