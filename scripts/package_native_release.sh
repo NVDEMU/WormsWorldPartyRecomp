@@ -315,7 +315,7 @@ int main(int argc, char **argv) {
 }
 C_SOURCE
     xcrun --find clang >/dev/null
-    clang -O2 -Wall -Wextra -Werror "$WORK/wwp-macos-launcher.c" -o "$MACOS/WormsWorldPartyRecompiled"
+    MACOSX_DEPLOYMENT_TARGET=11.0 clang -O2 -Wall -Wextra -Werror "$WORK/wwp-macos-launcher.c" -o "$MACOS/WormsWorldPartyRecompiled"
 
     NUMERIC_VERSION="${VERSION%%[-+]*}"
     cat > "$CONTENTS/Info.plist" <<PLIST
