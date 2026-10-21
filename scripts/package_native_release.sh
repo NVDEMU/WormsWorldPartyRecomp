@@ -5,7 +5,8 @@ set -euo pipefail
 
 PLATFORM="${1:?Usage: package_native_release.sh <platform> <version>}"
 VERSION="${2:?Usage: package_native_release.sh <platform> <version>}"
-DIST="${GITHUB_WORKSPACE:-$(pwd)}/dist"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DIST="${ROOT}/dist"
 ZIP="$(find "$DIST" -maxdepth 1 -type f -name "wwp-*-${PLATFORM}.zip" -print -quit)"
 if [[ -z "$ZIP" || ! -f "$ZIP" ]]; then
   echo "::error::No portable ZIP found for ${PLATFORM} in ${DIST}"
@@ -252,7 +253,7 @@ DESKTOP
       --icon-file "$APPDIR/usr/share/icons/hicolor/256x256/apps/wwp.${ICON##*.}" \
       --output appimage
 
-    APPIMAGE="$(find . -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+    APPIMAGE="$(find "${ROOT}" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
     if [[ -z "$APPIMAGE" ]]; then
       echo "::error::linuxdeploy did not produce an AppImage"
       find "$WORK" -maxdepth 4 -type f | head -80
