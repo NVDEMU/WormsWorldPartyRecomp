@@ -368,6 +368,25 @@ def restore_macos_rollback(install_root: Path, staging_parent: Path) -> Path:
         candidate.rename(desired)
         candidate = desired
     preserve_macos_user_data(current, candidate)
+    # As with a normal update, re-seal an ad-hoc app after carrying forward the
+    # user's writable Resources. Never silently invalidate a Developer ID app.
+    signature = subprocess.run(
+        ["/usr/bin/codesign", "-dv", "--verbose=4", str(current)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False,
+    )
+    if "Authority=Developer ID Application:" in signature.stdout + signature.stderr:
+        raise RuntimeError(
+            "This installation has a Developer ID signature. Restore the backup "
+            "by installing its matching DMG; the updater will not rewrite a notarized app."
+        )
+    subprocess.run(
+        ["/usr/bin/codesign", "--force", "--deep", "--sign", "-", "--timestamp=none", str(candidate)],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+    )
+    subprocess.run(
+        ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(candidate)],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+    )
     backup = current.parent / f".{current.name}.rollback-{os.getpid()}"
     os.replace(current, backup)
     try:
@@ -636,7 +655,7 @@ def detached_runtime_bootstrap(argv: list[str]) -> bool:
         return False
 
     source_python = exe.parent if os.name == "nt" else exe.parent.parent
-    temp_root = Path(tempfile.mkdtemp(prefix="ape-escape-updater-runtime-"))
+    temp_root = Path(tempfile.mkdtemp(prefix="wwp-updater-runtime-"))
     target_python_root = temp_root / "python"
     shutil.copytree(source_python, target_python_root, dirs_exist_ok=True)
     staged_script = temp_root / "updater.py"
