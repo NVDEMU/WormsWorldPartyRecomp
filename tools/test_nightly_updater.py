@@ -159,8 +159,8 @@ class NightlyUpdaterTests(unittest.TestCase):
             root = Path(temp)
             old_bundle = root / "Worms World Party Recompiled.app"
             new_bundle = root / "candidate" / "Worms World Party Recompiled.app"
-            old_runtime = old_bundle / "Contents" / "MacOS"
-            new_runtime = new_bundle / "Contents" / "MacOS"
+            old_runtime = old_bundle / "Contents" / "Resources"
+            new_runtime = new_bundle / "Contents" / "Resources"
             old_runtime.mkdir(parents=True)
             new_runtime.mkdir(parents=True)
 
