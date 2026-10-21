@@ -669,12 +669,43 @@ jobs:
           fi
           echo "zip verified: compiled game, bundled OpenBIOS, mod catalog, no kit / dumps / dev mods"
 
+      - name: Package Windows executable
+        if: matrix.artifact == 'windows-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/package_native_release.sh "${{ matrix.artifact }}" "${RELEASE_VERSION}"
+
+      - name: Package macOS app and DMG
+        if: startsWith(matrix.artifact, 'macos-')
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          bash scripts/package_native_release.sh "${{ matrix.artifact }}" "${RELEASE_VERSION}"
+
+      - name: Package Linux AppImage
+        if: matrix.artifact == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/package_native_release.sh "${{ matrix.artifact }}" "${RELEASE_VERSION}"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           # Artifact name uses the title zip prefix (e.g. bpe, motk).
           name: wwp-${{ matrix.artifact }}
-          path: dist/wwp-*-${{ matrix.artifact }}.zip
+          path: |
+            dist/wwp-*.zip
+            dist/wwp-*.exe
+            dist/wwp-*.dmg
+            dist/wwp-*.AppImage
           if-no-files-found: error
           retention-days: 30
 
@@ -695,13 +726,11 @@ jobs:
           path: artifacts
           merge-multiple: false
 
-      - name: Flatten zips
+      - name: Flatten release packages
         run: |
           set -euo pipefail
           mkdir -p dist
-          find artifacts -type f -name 'wwp-*.zip' -exec cp -v {} dist/ \;
-          ls -la dist/
-
+          find artifacts -type f \\( -name 'wwp-*.zip' -o -name 'wwp-*.exe' -o -name 'wwp-*.dmg' -o -name 'wwp-*.AppImage' \\) -exec cp -v {} dist/ \\;
       - name: Ensure release tag exists
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -724,7 +753,7 @@ jobs:
           # Quoted: titles may contain ':' (e.g. "Marvel vs. Capcom: …").
           name: "WormsWorldParty Recompiled ${{ needs.prepare.outputs.tag }}"
           files: |
-            dist/wwp-*.zip
+            dist/wwp-*
           generate_release_notes: true
           fail_on_unmatched_files: true
           target_commitish: ${{ github.sha }}
