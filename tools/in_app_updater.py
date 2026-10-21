@@ -273,7 +273,7 @@ def validate_single_app_bundle(staging: Path) -> Path:
 
 def updater_data_directory() -> Path:
     """Return the writable user-data folder shared with the launcher wrapper."""
-    override = os.environ.get("APE_ESCAPE_RECOMP_DATA_DIR")
+    override = os.environ.get("WWP_RECOMP_DATA_DIR")
     if override:
         return Path(override).expanduser()
     if sys.platform == "darwin":
@@ -428,7 +428,7 @@ def rollback_install(install_root: Path, parent_pid: int) -> Path:
         title="Worms World Party Recompiled — Roll Back"
     ):
         raise RuntimeError("Rollback cancelled.")
-    staging = Path(tempfile.mkdtemp(prefix="ape-escape-rollback-"))
+    staging = Path(tempfile.mkdtemp(prefix="wwp-rollback-"))
     try:
         wait_for_parent_exit(parent_pid)
         if sys.platform == "darwin":
@@ -722,7 +722,7 @@ def main() -> int:
         if not ask_yes_no(summary):
             return 0
 
-        work = Path(tempfile.mkdtemp(prefix="ape-escape-nightly-update-"))
+        work = Path(tempfile.mkdtemp(prefix="wwp-nightly-update-"))
         archive_path = work / str(package.get("name", "update.zip"))
         checksum_path = work / checksum_name
         try:
