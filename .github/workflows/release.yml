@@ -730,7 +730,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          find artifacts -type f \\( -name 'wwp-*.zip' -o -name 'wwp-*.exe' -o -name 'wwp-*.dmg' -o -name 'wwp-*.AppImage' \\) -exec cp -v {} dist/ \\;
+          find artifacts -type f \( -name 'wwp-*.zip' -o -name 'wwp-*.exe' -o -name 'wwp-*.dmg' -o -name 'wwp-*.AppImage' \) -exec cp -v {} dist/ \;
       - name: Ensure release tag exists
         if: github.event_name == 'workflow_dispatch'
         env:
