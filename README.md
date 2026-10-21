@@ -37,6 +37,21 @@ xattr -dr com.apple.quarantine "/Applications/Worms World Party Recompiled.app"
 
 This command changes macOS's downloaded-file security metadata; only use it for a copy you trust. It is not a substitute for Developer ID signing and notarization.
 
+## Built-in PSXRecomp mods
+
+The launcher includes the six builtin mod packages from this project's pinned PSXRecomp revision. Open **Mods** to review them; all are **disabled by default**. Three advanced/legacy entries are made visible by WWP-owned manifest overrides so you can opt into them knowingly.
+
+| Mod | What it does | Notes |
+|---|---|---|
+| **HD Texture Packs** | Loads compatible texture replacements or captures originals for editing | Replacements display through OpenGL; no WWP texture pack is bundled yet. |
+| **PGXP Precision** | Optional sub-pixel geometry and perspective-correct texturing | Visible effects depend on scene/build settings; use supersampling. Precise culling changes guest-visible results and should stay off unless tested. |
+| **Bezel Artwork** | Displays a selected image behind the game in letterbox/pillarbox margins | Presentation-only. |
+| **CD Speed (Advanced)** | Changes emulated CD sector timing to shorten some loads | May expose timing issues or cause stalls. Start low and disable it if anything behaves incorrectly. |
+| **8 MB Main RAM (Advanced)** | Enables expanded RAM for patches that specifically require it | Not a performance boost for normal WWP play; leave it off unless a mod asks for it. |
+| **Fast Loading (Legacy)** | Uses a generic host-pacing heuristic during suspected loading periods | Not WWP-specific and may offer little or no benefit. Experimental; leave off unless testing it deliberately. |
+
+These are framework-provided options, not six WWP-specific enhancements already proven in every scene. Keep timing/memory options off for normal play and back up saves before experimenting. The build stages the framework catalog automatically; the title-owned files under `mods/preloaded` only override visibility and wording for three entries. Player-installed mods and their saved selections remain separate from the bundled catalog.
+
 ## Build from source
 
 ### Requirements
