@@ -46,6 +46,24 @@ if(NOT EMSCRIPTEN AND NOT ANDROID)
     endif()
 endif()
 
+# The macOS app bundles runtime data in Contents/Resources but keeps the real
+# executable in Contents/MacOS. PSXRecomp otherwise scans <exe-dir>/mods and
+# leaves the pre-boot Mods list empty. Patch the pinned runtime's data-root
+# resolver before its source is added to the target. The script fails closed if
+# the expected upstream insertion point changes, so CI cannot silently ship
+# another app whose Mods provider points at the wrong directory.
+if(APPLE AND NOT EMSCRIPTEN AND NOT ANDROID)
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/apply_wwp_macos_bundle_paths_patch.py"
+                --runtime-main "${PSXRECOMP_ROOT}/runtime/src/main.cpp"
+        RESULT_VARIABLE WWP_MACOS_PATH_PATCH_RESULT
+    )
+    if(NOT WWP_MACOS_PATH_PATCH_RESULT EQUAL 0)
+        message(FATAL_ERROR "Could not apply the Worms World Party macOS app data-path patch.")
+    endif()
+endif()
+
 include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
 
 # This project's own mod catalog. The FRAMEWORK stages it after its builtin
