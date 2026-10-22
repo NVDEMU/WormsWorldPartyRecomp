@@ -83,9 +83,12 @@ on:
     tags:
       - 'v*'
 
+# Serialize release workflows for each ref. Including github.run_id made every
+# workflow its own concurrency group, so two Nightly builds could race while
+# force-moving the shared Nightly tag and uploading the same release assets.
 concurrency:
-  group: wwp-release-${{ github.event_name }}-${{ github.ref }}-${{ github.run_id }}
-  cancel-in-progress: true
+  group: wwp-release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
